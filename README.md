@@ -118,6 +118,231 @@ Telemetry is also published to **Amazon CloudWatch** under the custom `GenAIRout
 
 ---
 
+## Infrastructure as Code (IaC) Architecture
+
+The entire multi-model intelligent routing gateway infrastructure can be codified and deployed using modular HashiCorp Terraform configuration files:
+
+```text
+terraform-aws-genai-router/
+├── main.tf                 # AWS provider configuration (us-east-1), archive provider, and global tags
+├── variables.tf            # Parameterized inputs (region, project prefix, Bedrock model IDs, table names)
+├── terraform.tfvars        # Concrete runtime values for production routing operations
+├── iam.tf                  # Least-privilege IAM execution role and policy (Bedrock, DynamoDB, CloudWatch)
+├── dynamodb.tf             # DynamoDB on-demand audit ledger table (genai-routing-audit)
+├── lambda.tf               # Packaging (archive_file) and deployment of Python 3.12 router engine
+├── api_gateway.tf          # API Gateway HTTP API, $default stage, POST /route route, and Lambda integration
+├── cloudwatch.tf           # Custom CloudWatch dashboard (GenAIRouter telemetry) and log retention
+└── outputs.tf              # Exported API Gateway URL, DynamoDB table, Lambda ARN, and test cURL commands
+```
+
+---
+
+## Detailed File-by-File Technical Breakdown
+
+### `main.tf`
+
+Declares core Terraform requirements including the **AWS Provider** (`~> 5.0`) and **Archive Provider** (`~> 2.4`). Configures the target deployment region as **`us-east-1`** and establishes platform-wide default tags automatically inherited across all provisioned resources:
+
+```text
+Project     = "GenAI-MultiModel-Router"
+Environment = "Production"
+ManagedBy   = "Terraform"
+```
+
+### `variables.tf`
+
+Declares parameterized inputs with strict typing and defaults for flexible multi-environment deployment:
+
+```text
+aws_region
+project_name
+dynamodb_table_name
+fast_model_id
+powerful_model_id
+fallback_model_id
+```
+
+Default runtime values:
+
+```text
+aws_region          = "us-east-1"
+project_name        = "genai-routing"
+dynamodb_table_name = "genai-routing-audit"
+fast_model_id       = "amazon.nova-micro-v1:0"
+powerful_model_id   = "amazon.nova-lite-v1:0"
+fallback_model_id   = "amazon.nova-lite-v1:0"
+```
+
+### `terraform.tfvars`
+
+Provides explicit runtime variables decoupling environment-specific configuration from underlying logic, ensuring reproducible configurations between development and production.
+
+### `iam.tf`
+
+Authorizes the serverless compute execution boundary under the principle of least privilege.
+
+#### `aws_iam_role`
+
+Creates the Lambda execution role:
+
+```text
+GenAIRouterLambdaRole
+```
+
+The role is assumed by:
+
+```text
+lambda.amazonaws.com
+```
+
+#### Managed Policy Attachment
+
+Attaches the AWS-managed policy:
+
+```text
+AWSLambdaBasicExecutionRole
+```
+
+This enables standard CloudWatch log streaming for the Lambda function.
+
+#### `aws_iam_policy`
+
+Scopes access strictly to:
+
+```text
+bedrock:InvokeModel
+dynamodb:PutItem
+dynamodb:GetItem
+cloudwatch:PutMetricData
+```
+
+Access is limited to target Nova models, the DynamoDB audit ledger, and the custom `GenAIRouter` CloudWatch namespace.
+
+### `dynamodb.tf`
+
+Declares the persistent telemetry ledger:
+
+```text
+aws_dynamodb_table.genai-routing-audit
+```
+
+Configuration details:
+
+```text
+Partition Key: request_id (String)
+Sort Key: timestamp (Number)
+Billing Mode: PAY_PER_REQUEST
+Point-in-Time Recovery: Enabled
+```
+
+This allows the audit table to absorb dynamic, spiky AI inference traffic with zero capacity planning while protecting transactional audit trails against accidental data loss.
+
+### `lambda.tf`
+
+Manages the serverless compute runtime and packaging.
+
+#### `data.archive_file`
+
+Dynamically bundles the Python router source code into a zip archive during the Terraform plan/apply cycle.
+
+#### `aws_lambda_function`
+
+Deploys the router function:
+
+```text
+genai-router-lambda
+```
+
+Runtime configuration:
+
+```text
+Runtime: Python 3.12
+Memory: 256 MB
+Timeout: 30 seconds
+```
+
+Environment variables pass active Bedrock model IDs and DynamoDB table names directly into the Lambda runtime.
+
+### `api_gateway.tf`
+
+Provisions the public serverless API ingress layer.
+
+#### `aws_apigatewayv2_api`
+
+Creates the HTTP API:
+
+```text
+genai-routing-gw
+```
+
+The API is configured with built-in CORS headers.
+
+#### `aws_apigatewayv2_stage`
+
+Creates the default stage:
+
+```text
+$default
+```
+
+This enables zero-latency auto-deployment.
+
+#### `aws_apigatewayv2_route` & `aws_apigatewayv2_integration`
+
+Directs incoming requests to the Lambda router:
+
+```text
+POST /route
+Payload Format Version: 2.0
+```
+
+#### `aws_lambda_permission`
+
+Grants explicit invoke permissions to:
+
+```text
+apigateway.amazonaws.com
+```
+
+### `cloudwatch.tf`
+
+Establishes the observability and operational visualizer layer.
+
+#### `aws_cloudwatch_log_group`
+
+Enforces a 14-day log retention lifecycle on:
+
+```text
+/aws/lambda/genai-router-lambda
+```
+
+#### `aws_cloudwatch_dashboard`
+
+Generates the operational dashboard:
+
+```text
+routing_dashboard
+```
+
+The dashboard visualizes real-time `ModelInvocations` split by `ModelId` alongside automated `FallbackCount` pulses.
+
+### `outputs.tf`
+
+Exposes critical platform endpoints, infrastructure IDs, and ready-to-run terminal testing commands:
+
+```text
+api_gateway_endpoint
+dynamodb_table_name
+lambda_function_arn
+cloudwatch_dashboard_name
+curl_test_fast_tier
+curl_test_fallback
+```
+
+The output values support CLI validation, cross-service IAM mapping, and quick end-to-end testing of both the fast tier and automated circuit-breaker fallback path.
+
+---
+
 ## Technical Difficulties Faced & Engineering Resolutions
 
 ### Challenge 1: Unhandled Model Failures Returning 500s to Callers
