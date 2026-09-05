@@ -74,46 +74,7 @@ Telemetry is also published to **Amazon CloudWatch** under the custom `GenAIRout
 
 ## Architecture Diagram
 
-```text
-                                  User / Client
-                                       │
-                                       ▼ (HTTP POST /route)
-                            ┌─────────────────────┐
-                            │ Amazon API Gateway  │
-                            │ (genai-routing-gw)  │
-                            └──────────┬──────────┘
-                                       │
-                                       ▼ (Lambda Proxy Integration)
-                            ┌─────────────────────┐
-                            │ AWS Lambda Router   │
-                            │(genai-router-lambda)│
-                            └──────────┬──────────┘
-                                       │
-            ┌──────────────────────────┴──────────────────────────┐
-            │ Evaluate Heuristics: Length, Complexity, Latency    │
-            ▼                                                     ▼
-┌─────────────────────────┐                               ┌─────────────────────────┐
-│   Tier 1: Fast & Cheap  │                               │ Tier 2: Powerful/Reason │
-│ (amazon.nova-micro-v1:0)│                               │ (amazon.nova-lite-v1:0) │
-└────────────┬────────────┘                               └────────────┬────────────┘
-             │                                                         │
-             │ (On Failure / 429 Throttling / Timeout)                 │
-             └──────────────────────────┬──────────────────────────────┘
-                                        │
-                                        ▼
-                              ┌─────────────────────────┐
-                              │ Tier 3: Resilient Backup│
-                              │ (amazon.nova-lite-v1:0) │
-                              └────────────┬────────────┘
-                                           │
-            ┌──────────────────────────────┴──────────────────────────────┐
-            ▼                                                             ▼
-┌─────────────────────────┐                               ┌─────────────────────────┐
-│    Amazon DynamoDB      │                               │    Amazon CloudWatch    │
-│  (genai-routing-audit)  │                               │ (Namespace: GenAIRouter)│
-│  [Audit Log & Tokens]   │                               │ [Fallback & Model Rates]│
-└─────────────────────────┘                               └─────────────────────────┘
-```
+
 
 ---
 
@@ -304,17 +265,29 @@ curl -X POST https://cystj3w71l.execute-api.us-east-1.amazonaws.com/route \
 
 Displays CloudShell execution demonstrating Fast Tier routing at `751ms`, Reasoning Tier routing at `1782ms`, and automated circuit-breaker fallback failover at `2184ms`.
 
+<img width="1862" height="657" alt="Screenshot 1" src="https://github.com/user-attachments/assets/ee0b7bc2-e4f4-4fe2-bf66-8311ac1e7b36" />
+
 ### 2. DynamoDB Audit Ledger Entries
 
 Shows item listings inside the `genai-routing-audit` table documenting `request_id`, `primary_model`, `selected_model`, and `fallback_used` flags.
+
+<img width="1455" height="640" alt="Screenshot 2" src="https://github.com/user-attachments/assets/c998926b-5c27-4f1d-9510-2011b116714a" />
+
+
 
 ### 3. API Gateway Route & Integration
 
 Shows `POST /route` successfully bound to Lambda proxy integration `genai-router-lambda` with active `$default` deployment.
 
+<img width="1579" height="699" alt="Screenshot 3" src="https://github.com/user-attachments/assets/94a8aaac-931b-4199-94c4-05069baa9646" />
+
+
 ### 4. CloudWatch Custom Metric Telemetry
 
 Visualizes custom metric data in the `GenAIRouter` namespace, displaying `ModelInvocations` grouped by `ModelId` alongside `FallbackCount` anomalies.
+
+<img width="1667" height="727" alt="Screenshot 4" src="https://github.com/user-attachments/assets/48d0e0d8-3a19-4a7f-84c6-c28c34cd16b5" />
+
 
 ---
 
