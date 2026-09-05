@@ -74,6 +74,7 @@ Telemetry is also published to **Amazon CloudWatch** under the custom `GenAIRout
 
 ## Architecture Diagram
 
+<img width="1169" height="1216" alt="Architecture Diagram" src="https://github.com/user-attachments/assets/d0bdad0e-a88f-4ebc-ad53-f4e955540417" />
 
 
 ---
